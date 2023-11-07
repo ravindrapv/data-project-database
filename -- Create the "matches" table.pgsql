@@ -76,7 +76,7 @@ ORDER BY
 
 --3.calculateExtraRunsConcededIn2016
 SELECT
-    deliveries.batting_team AS team,
+    deliveries.bowling_team AS team,
     SUM(deliveries.extra_runs) AS extraRunsConceded
 FROM
     deliveries
@@ -85,69 +85,34 @@ JOIN
 WHERE
     matches.season = 2016
 GROUP BY
-    deliveries.batting_team
+    deliveries.bowling_team
 ORDER BY
     extraRunsConceded DESC;
 
 
 --4 calculateTopEconomicalBowlersIn2015
 
-WITH RunsConcededPerBowler AS (
+WITH BowlerEconomy AS (
     SELECT
         d.bowler AS bowler,
-        SUM(d.total_runs - d.bye_runs - d.legbye_runs) AS runsConceded,
-        SUM(CASE WHEN d.noball_runs > 0 THEN 1 ELSE 0 END) AS noBallCount,
-        SUM(CASE WHEN d.wide_runs > 0 THEN 1 ELSE 0 END) AS wideBallCount
+        SUM(d.total_runs - d.extra_runs) AS runsConceded,
+        COUNT(*) AS ballsBowled
     FROM
         deliveries AS d
     JOIN
         matches AS m ON d.match_id = m.id
     WHERE
-        m.season = 2015
+        m.season = '2015'
     GROUP BY
         d.bowler
-    HAVING
-        COUNT(*) >= 100 -- Assuming bowlers with 100 or more balls
 )
 SELECT
-    rcb.bowler AS bowler,
-    (SUM(rcb.runsConceded) - SUM(rcb.noBallCount) - SUM(rcb.wideBallCount)) AS runsExcludingExtras,
-    (SUM(rcb.runsConceded) - SUM(rcb.noBallCount) - SUM(rcb.wideBallCount)) / (SUM(rcb.noBallCount) + SUM(rcb.wideBallCount)) AS economy
+    bowler,
+    (SUM(runsConceded) / (SUM(ballsBowled) / 6)) AS economy
 FROM
-    RunsConcededPerBowler AS rcb
+    BowlerEconomy
 GROUP BY
-    rcb.bowler
-HAVING
-    SUM(rcb.noBallCount) + SUM(rcb.wideBallCount) > 0
-ORDER BY
-    economy
-LIMIT 10;WITH RunsConcededPerBowler AS (
-    SELECT
-        d.bowler AS bowler,
-        SUM(d.total_runs - d.bye_runs - d.legbye_runs) AS runsConceded,
-        SUM(CASE WHEN d.noball_runs > 0 THEN 1 ELSE 0 END) AS noBallCount,
-        SUM(CASE WHEN d.wide_runs > 0 THEN 1 ELSE 0 END) AS wideBallCount
-    FROM
-        deliveries AS d
-    JOIN
-        matches AS m ON d.match_id = m.id
-    WHERE
-        m.season = 2015
-    GROUP BY
-        d.bowler
-    HAVING
-        COUNT(*) >= 100 -- Assuming bowlers with 100 or more balls
-)
-SELECT
-    rcb.bowler AS bowler,
-    (SUM(rcb.runsConceded) - SUM(rcb.noBallCount) - SUM(rcb.wideBallCount)) AS runsExcludingExtras,
-    (SUM(rcb.runsConceded) - SUM(rcb.noBallCount) - SUM(rcb.wideBallCount)) / (SUM(rcb.noBallCount) + SUM(rcb.wideBallCount)) AS economy
-FROM
-    RunsConcededPerBowler AS rcb
-GROUP BY
-    rcb.bowler
-HAVING
-    SUM(rcb.noBallCount) + SUM(rcb.wideBallCount) > 0
+    bowler
 ORDER BY
     economy
 LIMIT 10;
@@ -155,52 +120,17 @@ LIMIT 10;
 
 --.5 findTeamsTossAndMatchWins
 
-WITH TossWins AS (
-    SELECT
-        team1 AS team,
-        COUNT(*) AS toss_wins
-    FROM
-        matches
-    WHERE
-        toss_winner = team1
-    GROUP BY
-        team1
-    UNION ALL
-    SELECT
-        team2 AS team,
-        COUNT(*) AS toss_wins
-    FROM
-        matches
-    WHERE
-        toss_winner = team2
-    GROUP BY
-        team2
-),
-MatchWins AS (
-    SELECT
-        winner AS team,
-        COUNT(*) AS match_wins
-    FROM
-        matches
-    WHERE
-        winner IS NOT NULL
-    GROUP BY
-        winner
-)
 SELECT
-    COALESCE(T.team, M.team) AS team,
-    COALESCE(T.toss_wins, 0) AS toss_wins,
-    COALESCE(M.match_wins, 0) AS match_wins
+    toss_winner AS team,
+    SUM(CASE WHEN toss_winner = winner THEN 1 ELSE 0 END) AS matchWins,
+    COUNT(*) AS tossWins
 FROM
-    TossWins AS T
-FULL JOIN
-    MatchWins AS M
-ON
-    T.team = M.team
-ORDER BY
-    team;
-
-
+    matches
+WHERE
+    toss_winner IS NOT NULL
+    AND winner IS NOT NULL
+GROUP BY
+    toss_winner;
 
 --6
 
@@ -238,129 +168,78 @@ ORDER BY
 
 
 --7.calculateBatsmanStrikeRate each year who has highest
-WITH BatsmanStats AS (
+WITH DhoniStats AS (
     SELECT
-        m.season,
-        d.batsman AS batsman,
-        SUM(d.batsman_runs) AS total_runs,
-        COUNT(*) AS balls_faced
+        m.season AS season,
+        SUM(CASE WHEN d.batsman = 'MS Dhoni' THEN d.batsman_runs ELSE 0 END) AS dhoni_runs,
+        SUM(CASE WHEN d.batsman = 'MS Dhoni' AND d.wide_runs = 0 THEN 1 ELSE 0 END) AS dhoni_balls
     FROM
-        deliveries AS d
-    JOIN
-        matches AS m ON d.match_id = m.id
-    WHERE
-        m.season IS NOT NULL
+        matches m
+    LEFT JOIN
+        deliveries d ON m.id = d.match_id
     GROUP BY
-        m.season, d.batsman
-),
-StrikeRate AS (
-    SELECT
-        season,
-        batsman,
-        total_runs,
-        balls_faced,
-        (total_runs * 100.0) / balls_faced AS strike_rate
-    FROM
-        BatsmanStats
-),
-MaxStrikeRatePerYear AS (
-    SELECT
-        season,
-        MAX(strike_rate) AS max_strike_rate
-    FROM
-        StrikeRate
-    GROUP BY
-        season
+        m.season
 )
 SELECT
-    msr.season,
-    sr.batsman AS batsman_with_highest_strike_rate,
-    msr.max_strike_rate
+    season,
+    ROUND(dhoni_runs * 100.0 / dhoni_balls, 2) AS strike_rate
 FROM
-    MaxStrikeRatePerYear AS msr
-JOIN
-    StrikeRate AS sr ON msr.season = sr.season AND msr.max_strike_rate = sr.strike_rate;
-
-
+    DhoniStats
+WHERE
+    dhoni_balls > 0
+ORDER BY
+    season;
+    
 --8 findDismissalStats
 WITH DismissalStats AS (
     SELECT
-        d.batsman AS batsman,
-        d.player_dismissed AS dismissed_player,
-        COUNT(*) AS dismissals
+        d.player_dismissed AS dismissedPlayer,
+        d.bowler AS bowler,
+        COUNT(*) AS dismissalCount
     FROM
         deliveries AS d
     WHERE
         d.player_dismissed IS NOT NULL
     GROUP BY
-        d.batsman, d.player_dismissed
-),
-TopDismissals AS (
-    SELECT
-        ds.batsman AS batsman_with_highest_dismissals,
-        ds.dismissed_player AS bowler_with_most_dismissals,
-        MAX(ds.dismissals) AS max_dismissals
-    FROM
-        DismissalStats AS ds
-    GROUP BY
-        ds.batsman, ds.dismissed_player
-    ORDER BY
-        MAX(ds.dismissals) DESC
-    LIMIT 1
+        d.player_dismissed,
+        d.bowler
 )
 SELECT
-    top.batsman_with_highest_dismissals,
-    top.bowler_with_most_dismissals,
-    top.max_dismissals
+    dismissedPlayer AS batsman,
+    bowler,
+    dismissalCount AS count
 FROM
-    TopDismissals AS top;
+    DismissalStats
+ORDER BY
+    dismissalCount DESC
+LIMIT 1;
 
 -- 9.
 WITH SuperOvers AS (
     SELECT
-        d.match_id,
-        d.over,
-        m.team2 AS team_bowling,
-        d.bowler,
-        SUM(d.total_runs) AS runs_given
+        d.bowler AS bowler,
+        SUM(d.total_runs - d.bye_runs - d.legbye_runs) AS runsConceded,
+        SUM(CASE WHEN d.noball_runs > 0 THEN 1 ELSE 0 END) AS noBallCount,
+        SUM(CASE WHEN d.wide_runs > 0 THEN 1 ELSE 0 END) AS wideBallCount
     FROM
         deliveries AS d
-    JOIN
-        matches AS m ON d.match_id = m.id
     WHERE
         d.is_super_over = 1
     GROUP BY
-        d.match_id, d.over, m.team2, d.bowler
-),
-SuperOverEconomy AS (
-    SELECT
-        team_bowling,
-        bowler,
-        SUM(runs_given) AS total_runs_given,
-        COUNT(DISTINCT over) AS overs_bowled
-    FROM
-        SuperOvers
-    GROUP BY
-        team_bowling, bowler
-),
-BestSuperOverEconomy AS (
-    SELECT
-        team_bowling,
-        bowler,
-        (total_runs_given * 6.0) / overs_bowled AS economy_rate
-    FROM
-        SuperOverEconomy
+        d.bowler
+    HAVING
+        COUNT(*) >= 6 -- Assuming Super Over consists of 6 balls
 )
 SELECT
-    team_bowling,
     bowler,
-    economy_rate
+    (SUM(runsConceded) - SUM(noBallCount) - SUM(wideBallCount)) / 1.0 AS economy
 FROM
-    BestSuperOverEconomy
+    SuperOvers
+GROUP BY
+    bowler
 ORDER BY
-    economy_rate
+    economy
 LIMIT 1;
-
 
 COPY matches FROM '/var/lib/postgresql/matches.csv' WITH CSV HEADER;
 COPY deliveries FROM '/var/lib/postgresql/deliveries.csv' WITH CSV HEADER;
