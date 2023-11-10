@@ -189,7 +189,7 @@ WHERE
     dhoni_balls > 0
 ORDER BY
     season;
-    
+
 --8 findDismissalStats
 WITH DismissalStats AS (
     SELECT
@@ -228,7 +228,7 @@ WITH SuperOvers AS (
     GROUP BY
         d.bowler
     HAVING
-        COUNT(*) >= 6 -- Assuming Super Over consists of 6 balls
+        COUNT(*) >= 6 
 )
 SELECT
     bowler,
